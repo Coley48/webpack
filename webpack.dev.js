@@ -5,7 +5,7 @@ const {
 
 module.exports = merge(config, {
     mode: 'development',
-    devtool: 'source-map',
+    devtool: 'inline-source-map',
     output: {
         publicPath: '',
     },
@@ -49,5 +49,4 @@ module.exports = merge(config, {
     optimization: {
         runtimeChunk: 'single'
     }
-
 });

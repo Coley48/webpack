@@ -71,11 +71,6 @@ webpack 5.37.1 compiled with 1 warning in 201 ms
 
 4. 得到打包好的输出文件`dist/main.js`；
 
-```js
-// dist/main.js
-(()=>{var r={85:r=>{r.exports={print:function(r){console.log(r)}}}},o={};(function t(e){var n=o[e];if(void 0!==n)return n.exports;var p=o[e]={exports:{}};return r[e](p,p.exports,t),p.exports})(85).print("Hello, world!")})();
-```
-
 ### 基本概念
 
 - **入口**（entry）：指示 webpack 应该使用哪个模块，来作为构建其内部依赖图（dependency graph）的开始，默认值是`./src/index.js`。
@@ -104,25 +99,177 @@ webpack 可以无需使用任何配置文件。webpack 会假定项目的入口�
 }
 ```
 
-将相同的公共配置放入`webpack.common.js`中：
+遵循不重复原则(Don't repeat yourself - DRY)，保留一个通用配置，将相同的公共配置放入`webpack.common.js`中：
 
 **webpack.common.js**
 ```js
+const path = require('path');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 
+module.exports = {
+    entry: {
+        index: './src/index.js',
+        print: './src/print.js',
+    },
+    output: {
+        filename: '[name].bundle.js',
+        path: path.resolve(__dirname, 'dist'),
+    },
+    module: {
+        rules: [{
+            test: /\.js$/,
+            include: path.resolve(__dirname, 'src'),
+            loader: 'babel-loader',
+        }, ],
+    },
+    resolve: {
+        symlinks: false,
+    },
+    optimization: {
+        sideEffects: true,
+        usedExports: true,
+        splitChunks: {
+            chunks: 'async', // 对哪些块进行优化，all | async | initial，
+            cacheGroups: {
+                vendors: {
+                    test: /[\\/]node_modules[\\/]/,
+                    priority: -10,
+                    reuseExistingChunk: true,
+                },
+                default: {
+                    minChunks: 2,
+                    priority: -20,
+                    reuseExistingChunk: true,
+                },
+            },
+        },
+    },
+};
 ```
 
 将开发模式的配置放入`webpack.dev.js`中：
 
 **webpack.dev.js**
 ```js
+const config = require('./webpack.common.js');
+const {
+    merge
+} = require('webpack-merge');
 
+module.exports = merge(config, {
+    mode: 'development',
+    devtool: 'source-map',
+    output: {
+        publicPath: '',
+    },
+    devServer: {
+        open: true,
+        host: "localhost",
+        port: 8000,
+        hot: true,
+        historyApiFallback: {
+            index: '/index.html'
+        }
+    },
+    module: {
+        rules: [{
+                test: /\.css$/,
+                use: [
+                    'vue-style-loader',
+                    {
+                        loader: 'css-loader',
+                        options: {
+                            esModule: false,
+                        }
+                    },
+                ]
+            },
+            {
+                test: /\.less$/,
+                use: [
+                    'vue-style-loader',
+                    {
+                        loader: 'css-loader',
+                        options: {
+                            esModule: false,
+                        }
+                    },
+                    'less-loader'
+                ]
+            },
+        ]
+    },
+    optimization: {
+        runtimeChunk: 'single'
+    }
+
+});
 ```
 
 将生产模式的配置放入`webpack.prod.js`中：
 
 **webpack.prod.js**
 ```js
+const { merge } = require('webpack-merge');
+const config = require('./webpack.common.js');
+const { CleanWebpackPlugin } = require('clean-webpack-plugin');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const OptimizeCssAssetsPlugin = require('optimize-css-assets-webpack-plugin');
 
+module.exports = merge(config, {
+    mode: 'production',
+    output: {
+        publicPath: '',
+    },
+    plugins: [
+        new CleanWebpackPlugin(),
+        new MiniCssExtractPlugin({
+            filename: 'css/[name].[contenthash:8].css'
+        }),
+        new OptimizeCssAssetsPlugin({
+            assetNameRegExp: /\.css$/,
+            cssProcessor: require('cssnano'),
+            cssProcessorPluginOptions: {
+                preset: ['default', {
+                    discardComments: {
+                        removeAll: true
+                    }
+                }],
+            },
+            canPrint: true
+        }),
+    ],
+    module: {
+        rules: [{
+                test: /\.css$/,
+                sideEffects: true,
+                use: [{
+                        loader: MiniCssExtractPlugin.loader,
+                        options: {
+                            publicPath: "../"
+                        }
+                    },
+                    'css-loader',
+                    'postcss-loader'
+                ]
+            },
+            {
+                test: /\.less$/,
+                sideEffects: true,
+                use: [{
+                        loader: MiniCssExtractPlugin.loader,
+                        options: {
+                            publicPath: "../"
+                        }
+                    },
+                    'css-loader',
+                    'postcss-loader',
+                    'less-loader'
+                ]
+            }
+        ]
+    }
+});
 ```
 
 使用 webpack-cli 脚手架初始化项目，需要安装 @webpack-cli/generators 依赖；
@@ -133,33 +280,15 @@ webpack 可以无需使用任何配置文件。webpack 会假定项目的入口�
 
 #### 实现热重载
 
-热重载能为开发提供极大的便利，不需要每次修改代码后手动编译，然后在浏览器中手动刷新页面来观察效果；同时每次只更新改动部分的代码，并且将编译的结果存在内存中；这里提供两种实现热重载的方式：
-
-通过在内存中（而不是写入磁盘）编译和 serve 资源来提高性能：
+热重载能为开发提供极大的便利，不需要每次修改代码后手动编译，然后在浏览器中手动刷新页面来观察效果；同时每次只更新改动部分的代码，并且将编译的结果存在内存中；通过在内存中（而不是写入磁盘）编译和 serve 资源来提高性能。这里提供两种实现热重载的方式：
 
 **webpack-dev-serve**
-使用 webpack 官方提供的开发服务器实现热重载是最简便的方式，需要安装开发依赖`webpack-dev-serve`，然后只需要在`webpack.dev.js`配置文件中添加 sever 的相关配置即可；
+使用 webpack 官方提供的开发服务器实现热重载是最简便的方式，需要安装开发依赖`webpack-dev-serve`，然后只需要在`webpack.dev.js`配置文件中添加 devSever 项的配置即可；
 
 **webpack watch + live server**
-使用 webpack 的 watch 模式是一种替代方案，它会实时监听文件的变动，保存后便开始编译，并将文件输出到 dist 文件夹下
+使用 webpack 的 watch 模式是一种替代方案，它会实时监听文件的变动，编辑保存后便开始编译，并将文件输出到 dist 文件夹下，然后开启 VS Code 的插件 live server 即可实现模块热替换。
 
 ### 附录
-
-0. 待完善
-```txt
-安装加载器 loader -D
-css-loader
-style-loader
-file-loader
-csv-loader
-xml-loader
-ts-loader
-source-map-loader
-
-安装插件 plugin -D
-html-webpack-plugin
-mini-css-extract-plugin
-```
 
 1. package.json 属性说明
 
@@ -199,7 +328,7 @@ mini-css-extract-plugin
 
 ### 参考资料
 
-- [webpack中文官方文档](https://webpack.docschina.org/concepts/)
-- [webpack v4 官网](https://v4.webpack.js.org/)
+- [webpack中文官方文档](https://webpack.docschina.org)
+- [webpack v4 官网](https://v4.webpack.js.org)
 - [一个简单打包工具的详细说明](https://github.com/ronami/minipack)
 - [nodejs 中的依赖管理](https://blog.csdn.net/weixin_33936401/article/details/87963738)
